@@ -4,6 +4,7 @@ cachetools==5.5.0
 certifi==2024.12.14
 charset-normalizer==3.4.1
 click==8.1.8
+dnspython==2.7.0
 exceptiongroup==1.2.2
 fastapi==0.115.6
 google-ai-generativelanguage==0.6.10
@@ -26,6 +27,7 @@ pyasn1==0.6.1
 pyasn1_modules==0.4.1
 pydantic==2.10.5
 pydantic_core==2.27.2
+pymongo==4.10.1
 pyparsing==3.2.1
 python-dotenv==1.0.1
 python-telegram-bot==21.10
