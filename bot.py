@@ -1,17 +1,26 @@
 import logging
 import os
+import re
 from dotenv import load_dotenv
-from telegram import Update, ForceReply, constants
+from telegram import Update, ForceReply, constants, File
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from pymongo.errors import OperationFailure
 import asyncio
 from db import connect_to_mongodb, get_users_collection, get_log_collection, close_mongodb_connection
+import aiohttp
+import aiofiles
+from aiofiles.threadpool.binary import AsyncFileIO
+from tqdm.asyncio import tqdm
+from pathlib import Path
 
 # Load environment variables
 load_dotenv()
 
 # Telegram Bot Token
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+API_KEY = os.getenv("API_KEY")
+USER_ID = os.getenv("USER_ID")
+DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR")
 
 # Configure logging
 logging.basicConfig(
@@ -279,6 +288,183 @@ async def log_activity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except OperationFailure as e:
         logger.error(f"MongoDB operation failed: {e}")
 
+async def download_and_send_file(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str) -> None:
+    """Downloads a file from a given URL and sends it to the user."""
+    user_id = update.effective_user.id
+    
+    log_collection = get_log_collection()
+    # Log the start of the download process
+    log_entry = {
+        "user_id": user_id,
+        "event": "download_start",
+        "url": url,
+        "timestamp": update.message.date
+    }
+    try:
+        log_collection.insert_one(log_entry)
+        logger.info(f"Starting download for user {user_id} from URL: {url}")
+    except OperationFailure as e:
+        logger.error(f"MongoDB operation failed: {e}")
+
+    # Call Premium.to API to get the file
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get('http://api.premium.to/api/2/getfile.php', params={
+                'userid': USER_ID,
+                'apikey': API_KEY,
+                'link': url
+            }) as response:
+                if response.status != 200:
+                    error_msg = f"Error: Premium.to API returned status code {response.status}"
+                    await update.message.reply_text(error_msg)
+                    # Log the error
+                    log_collection.insert_one({
+                        "user_id": user_id,
+                        "event": "error",
+                        "message": error_msg,
+                        "timestamp": update.message.date
+                    })
+                    return
+                try:
+                    api_response = await response.json()
+                except aiohttp.ContentTypeError as e:
+                    logger.error(f"Failed to decode JSON response: {e}")
+                    await update.message.reply_text("Error: Invalid response from Premium.to API.")
+                    return
+                
+                if 'download' not in api_response:
+                    error_msg = f"Error: Invalid response from Premium.to API. {api_response.get('message', 'Unknown error')}"
+                    await update.message.reply_text(error_msg)
+                    # Log the error
+                    log_collection.insert_one({
+                        "user_id": user_id,
+                        "event": "error",
+                        "message": error_msg,
+                        "timestamp": update.message.date
+                    })
+                    return
+
+                download_url = api_response['download']
+    except Exception as e:
+        error_msg = f"Error calling Premium.to API: {e}"
+        await update.message.reply_text(error_msg)
+        # Log the error
+        log_collection.insert_one({
+            "user_id": user_id,
+            "event": "error",
+            "message": error_msg,
+            "timestamp": update.message.date
+        })
+        return
+
+    # Inform the user that the download is starting
+    await update.message.reply_text("Download starting...")
+
+    # Download the file and send it to the user
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(download_url) as response:
+                total_size = int(response.headers.get('Content-Length', 0))
+
+                # Create user directory if it doesn't exist
+                user_dir = Path(DOWNLOAD_DIR) / str(user_id)
+                user_dir.mkdir(parents=True, exist_ok=True)
+
+                file_name = os.path.basename(url)
+                file_path = user_dir / file_name
+
+                async with aiofiles.open(file_path, 'wb') as f:
+                    chunk_size = 4096
+                    downloaded_size = 0
+
+                    async for chunk in response.content.iter_chunked(chunk_size):
+                        if chunk:
+                            await f.write(chunk)
+                            downloaded_size += len(chunk)
+                            # Calculate progress percentage
+                            progress = int((downloaded_size / total_size) * 100) if total_size > 0 else 0
+                            # Log the progress
+                            log_collection.insert_one({
+                                "user_id": user_id,
+                                "event": "download_progress",
+                                "progress": progress,
+                                "downloaded": downloaded_size,
+                                "total": total_size,
+                                "timestamp": update.message.date
+                            })
+                            # Send progress update to user (optional)
+                            await context.bot.edit_message_text(
+                                chat_id=update.message.chat_id,
+                                message_id=update.message.message_id + 1,  # Assumes this is the next message
+                                text=f"Downloading: {progress}%"
+                            )
+
+        # Send the downloaded file to the user
+        file_doc = await context.bot.send_document(
+            chat_id=update.message.chat_id,
+            document=open(file_path, 'rb'),
+            caption="Here is your file!"
+        )
+
+        # Get the file ID from the sent document
+        file_id = file_doc.document.file_id
+
+        # Get the file path on Telegram's server
+        file_path_on_telegram = await context.bot.get_file(file_id)
+
+        # Construct the URL to the file on Telegram's server
+        # Replace `BOT_TOKEN` with your actual bot token
+        file_url_on_telegram = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path_on_telegram.file_path}"
+
+        # Log the successful download
+        log_collection.insert_one({
+            "user_id": user_id,
+            "event": "download_complete",
+            "file_url": file_url_on_telegram,
+            "timestamp": update.message.date
+        })
+
+        # Inform the user with the link to the file
+        await update.message.reply_text(
+            f"Your file has been downloaded and is available here: {file_url_on_telegram}"
+        )
+
+    except Exception as e:
+        error_msg = f"Error during download or sending file: {e}"
+        await update.message.reply_text(error_msg)
+        # Log the error
+        log_collection.insert_one({
+            "user_id": user_id,
+            "event": "error",
+            "message": error_msg,
+            "timestamp": update.message.date
+        })
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles incoming messages and processes Rapidgator URLs."""
+    message_text = update.message.text
+    user_id = update.effective_user.id
+
+    # Log the received message
+    log_collection = get_log_collection()
+    log_entry = {
+        "user_id": user_id,
+        "event": "message_received",
+        "message": message_text,
+        "timestamp": update.message.date
+    }
+    try:
+        log_collection.insert_one(log_entry)
+        logger.info(f"User {user_id} sent a message: {message_text}")
+    except OperationFailure as e:
+        logger.error(f"MongoDB operation failed: {e}")
+
+    # Check if the message is a Rapidgator URL
+    if re.match(r"https?://(www\.)?rapidgator\.net", message_text):
+        await download_and_send_file(update, context, message_text)
+    else:
+        await update.message.reply_text("Please send a valid Rapidgator URL.")
+
 # Error handler
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors caused by updates."""
@@ -302,8 +488,8 @@ async def run_bot():
     bot_app.add_handler(MessageHandler(filters.ALL & (~filters.COMMAND), check_user_started), group=-2)
     bot_app.add_handler(MessageHandler(filters.ALL & (~filters.COMMAND), check_registration), group=-1)
 
-    # Add message handler to log all user activity
-    bot_app.add_handler(MessageHandler(filters.ALL, log_activity), group=1)  # Log activity runs in group 1
+    # Add message handler to log all user activity and handle Rapidgator URLs
+    bot_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message), group=1)
 
     # Add error handler
     bot_app.add_error_handler(error_handler)
