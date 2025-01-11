@@ -314,7 +314,135 @@ async def download_and_send_file(update: Update, context: ContextTypes.DEFAULT_T
                 'apikey': API_KEY,
                 'link': url
             }) as response:
-                if response.status != 200:
+                # Handle API response based on status code and JSON content
+                if response.status == 200:
+                    # Check content type
+                    if response.headers.get('Content-Type') == 'application/octet-stream':
+                        # Download the file and send it to the user
+                        try:
+                            total_size = int(response.headers.get('Content-Length', 0))
+
+                            # Create user directory if it doesn't exist
+                            user_dir = Path(DOWNLOAD_DIR) / str(user_id)
+                            user_dir.mkdir(parents=True, exist_ok=True)
+
+                            file_name = os.path.basename(url)
+                            file_path = user_dir / file_name
+
+                            async with aiofiles.open(file_path, 'wb') as f:
+                                chunk_size = 4096
+                                downloaded_size = 0
+
+                                async for chunk in response.content.iter_chunked(chunk_size):
+                                    if chunk:
+                                        await f.write(chunk)
+                                        downloaded_size += len(chunk)
+                                        # Calculate progress percentage
+                                        progress = int((downloaded_size / total_size) * 100) if total_size > 0 else 0
+                                        # Log the progress
+                                        log_collection.insert_one({
+                                            "user_id": user_id,
+                                            "event": "download_progress",
+                                            "progress": progress,
+                                            "downloaded": downloaded_size,
+                                            "total": total_size,
+                                            "timestamp": update.message.date
+                                        })
+                                        # Send progress update to user (optional)
+                                        await context.bot.edit_message_text(
+                                            chat_id=update.message.chat_id,
+                                            message_id=update.message.message_id + 1,  # Assumes this is the next message
+                                            text=f"Downloading: {progress}%"
+                                        )
+
+                            # Send the downloaded file to the user
+                            file_doc = await context.bot.send_document(
+                                chat_id=update.message.chat_id,
+                                document=open(file_path, 'rb'),
+                                caption="Here is your file!"
+                            )
+
+                            # Get the file ID from the sent document
+                            file_id = file_doc.document.file_id
+
+                            # Get the file path on Telegram's server
+                            file_path_on_telegram = await context.bot.get_file(file_id)
+
+                            # Construct the URL to the file on Telegram's server
+                            # Replace `BOT_TOKEN` with your actual bot token
+                            file_url_on_telegram = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path_on_telegram.file_path}"
+
+                            # Log the successful download
+                            log_collection.insert_one({
+                                "user_id": user_id,
+                                "event": "download_complete",
+                                "file_url": file_url_on_telegram,
+                                "timestamp": update.message.date
+                            })
+
+                            # Inform the user with the link to the file
+                            await update.message.reply_text(
+                                f"Your file has been downloaded and is available here: {file_url_on_telegram}"
+                            )
+
+                        except Exception as e:
+                            error_msg = f"Error during download or sending file: {e}"
+                            await update.message.reply_text(error_msg)
+                            # Log the error
+                            log_collection.insert_one({
+                                "user_id": user_id,
+                                "event": "error",
+                                "message": error_msg,
+                                "timestamp": update.message.date
+                            })
+                        return
+                    else:
+                        # Handle API error codes (JSON response)
+                        try:
+                            api_response = await response.json()
+                            if "code" in api_response:
+                                error_code = api_response["code"]
+                                error_message = api_response.get("message", "Unknown error")
+
+                                # Map error codes to messages
+                                error_messages = {
+                                    400: "Invalid parameters",
+                                    401: "Invalid API authentication",
+                                    402: "Filehost is not supported",
+                                    403: "Not enough traffic",
+                                    404: "File not found",
+                                    429: "Too many open connections",
+                                    500: "Currently no available premium account for this filehost",
+                                }
+                                error_msg = error_messages.get(error_code, f"Unknown error (code {error_code})")
+
+                                await update.message.reply_text(f"Error: {error_msg}")
+                                # Log the error
+                                log_collection.insert_one({
+                                    "user_id": user_id,
+                                    "event": "error",
+                                    "message": error_msg,
+                                    "timestamp": update.message.date
+                                })
+                                return
+                        except aiohttp.ContentTypeError:
+                            logger.error(f"Failed to decode JSON response: {await response.text()}")
+                            await update.message.reply_text("Error: Invalid response from Premium.to API.")
+                            return
+
+                elif response.status == 302:
+                    redirect_url = response.headers.get('Location')
+                    logger.info(f"Received redirect to: {redirect_url}")
+                    # Log redirect
+                    log_collection.insert_one({
+                        "user_id": user_id,
+                        "event": "redirect",
+                        "url": redirect_url,
+                        "timestamp": update.message.date
+                    })
+                    await update.message.reply_text(f"Download redirected to: {redirect_url}")
+                    return
+                else:
                     error_msg = f"Error: Premium.to API returned status code {response.status}"
                     await update.message.reply_text(error_msg)
                     # Log the error
@@ -325,26 +453,7 @@ async def download_and_send_file(update: Update, context: ContextTypes.DEFAULT_T
                         "timestamp": update.message.date
                     })
                     return
-                try:
-                    api_response = await response.json()
-                except aiohttp.ContentTypeError as e:
-                    logger.error(f"Failed to decode JSON response: {e}")
-                    await update.message.reply_text("Error: Invalid response from Premium.to API.")
-                    return
-                
-                if 'download' not in api_response:
-                    error_msg = f"Error: Invalid response from Premium.to API. {api_response.get('message', 'Unknown error')}"
-                    await update.message.reply_text(error_msg)
-                    # Log the error
-                    log_collection.insert_one({
-                        "user_id": user_id,
-                        "event": "error",
-                        "message": error_msg,
-                        "timestamp": update.message.date
-                    })
-                    return
 
-                download_url = api_response['download']
     except Exception as e:
         error_msg = f"Error calling Premium.to API: {e}"
         await update.message.reply_text(error_msg)
@@ -356,89 +465,6 @@ async def download_and_send_file(update: Update, context: ContextTypes.DEFAULT_T
             "timestamp": update.message.date
         })
         return
-
-    # Inform the user that the download is starting
-    await update.message.reply_text("Download starting...")
-
-    # Download the file and send it to the user
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(download_url) as response:
-                total_size = int(response.headers.get('Content-Length', 0))
-
-                # Create user directory if it doesn't exist
-                user_dir = Path(DOWNLOAD_DIR) / str(user_id)
-                user_dir.mkdir(parents=True, exist_ok=True)
-
-                file_name = os.path.basename(url)
-                file_path = user_dir / file_name
-
-                async with aiofiles.open(file_path, 'wb') as f:
-                    chunk_size = 4096
-                    downloaded_size = 0
-
-                    async for chunk in response.content.iter_chunked(chunk_size):
-                        if chunk:
-                            await f.write(chunk)
-                            downloaded_size += len(chunk)
-                            # Calculate progress percentage
-                            progress = int((downloaded_size / total_size) * 100) if total_size > 0 else 0
-                            # Log the progress
-                            log_collection.insert_one({
-                                "user_id": user_id,
-                                "event": "download_progress",
-                                "progress": progress,
-                                "downloaded": downloaded_size,
-                                "total": total_size,
-                                "timestamp": update.message.date
-                            })
-                            # Send progress update to user (optional)
-                            await context.bot.edit_message_text(
-                                chat_id=update.message.chat_id,
-                                message_id=update.message.message_id + 1,  # Assumes this is the next message
-                                text=f"Downloading: {progress}%"
-                            )
-
-        # Send the downloaded file to the user
-        file_doc = await context.bot.send_document(
-            chat_id=update.message.chat_id,
-            document=open(file_path, 'rb'),
-            caption="Here is your file!"
-        )
-
-        # Get the file ID from the sent document
-        file_id = file_doc.document.file_id
-
-        # Get the file path on Telegram's server
-        file_path_on_telegram = await context.bot.get_file(file_id)
-
-        # Construct the URL to the file on Telegram's server
-        # Replace `BOT_TOKEN` with your actual bot token
-        file_url_on_telegram = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path_on_telegram.file_path}"
-
-        # Log the successful download
-        log_collection.insert_one({
-            "user_id": user_id,
-            "event": "download_complete",
-            "file_url": file_url_on_telegram,
-            "timestamp": update.message.date
-        })
-
-        # Inform the user with the link to the file
-        await update.message.reply_text(
-            f"Your file has been downloaded and is available here: {file_url_on_telegram}"
-        )
-
-    except Exception as e:
-        error_msg = f"Error during download or sending file: {e}"
-        await update.message.reply_text(error_msg)
-        # Log the error
-        log_collection.insert_one({
-            "user_id": user_id,
-            "event": "error",
-            "message": error_msg,
-            "timestamp": update.message.date
-        })
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles incoming messages and processes Rapidgator URLs."""
