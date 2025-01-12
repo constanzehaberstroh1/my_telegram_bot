@@ -1,4 +1,4 @@
-import mimetypes
+# premium.py
 import aiohttp
 import aiofiles
 from aiofiles.threadpool.binary import AsyncFileIO
@@ -10,9 +10,20 @@ from telegram.error import BadRequest, TimedOut
 import re
 import hashlib
 from db import add_file_info, update_file_thumbnail
-import ffmpeg  # Import ffmpeg-python
+import ffmpeg
+import magic  # Import python-magic
 
 logger = logging.getLogger(__name__)
+
+def guess_mime_type_from_header(file_path):
+    """Guesses the MIME type of a file based on its header (magic number)."""
+    try:
+        mime = magic.Magic(mime=True)
+        mime_type = mime.from_file(file_path)
+        return mime_type
+    except magic.MagicException as e:
+        logger.error(f"Error guessing MIME type from header: {e}")
+        return None
 
 async def download_file_from_premium_to(url: str, user_id: int, api_key: str, user_premium_id: str, download_dir: str, update, context):
     """
@@ -112,8 +123,10 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                             add_file_info(file_hash_str, str(final_file_path), file_name)
 
                             # Check if the file is a video and create a thumbnail
-                            mime_type = mimetypes.guess_type(str(final_file_path))[0]
-                            if (mime_type and mime_type.startswith('video/')) or str(final_file_path).lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
+                            mime_type = guess_mime_type_from_header(str(final_file_path))  # Use the new function
+                            logger.info(f"File: {final_file_path}, MIME type (from header): {mime_type}")
+
+                            if (mime_type and mime_type.startswith('video/')) or str(final_file_path).lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):  # Use header-based MIME type
                                 images_dir = os.getenv("IMAGES_DIR")
                                 if images_dir:
                                     thumbnail_dir = Path(images_dir) / str(user_id)
