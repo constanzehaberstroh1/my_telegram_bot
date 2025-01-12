@@ -112,7 +112,8 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                             add_file_info(file_hash_str, str(final_file_path), file_name)
 
                             # Check if the file is a video and create a thumbnail
-                            if mimetypes.guess_type(str(final_file_path))[0].startswith('video/'):
+                            mime_type = mimetypes.guess_type(str(final_file_path))[0]
+                            if (mime_type and mime_type.startswith('video/')) or str(final_file_path).lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
                                 images_dir = os.getenv("IMAGES_DIR")
                                 if images_dir:
                                     thumbnail_dir = Path(images_dir) / str(user_id)
