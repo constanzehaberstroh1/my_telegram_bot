@@ -3,7 +3,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from threading import Thread
 from bot import run_bot, stop_bot
-from db import get_log_collection, close_mongodb_connection, connect_to_mongodb, get_file_info_by_hash
+from db import get_log_collection, close_mongodb_connection, connect_to_mongodb
 import logging
 import time
 from typing import List
@@ -189,4 +189,5 @@ async def download_file(file_hash: str):
 
 if __name__ == "__main__":
     logger.info("Starting FastAPI application...")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))  # Get port from environment variable or use 8000 as default
+    uvicorn.run(app, host="0.0.0.0", port=port)
