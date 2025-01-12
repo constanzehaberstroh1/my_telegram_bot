@@ -111,7 +111,7 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                             add_file_info(file_hash_str, str(final_file_path), file_name)
 
                             # Check file size and decide whether to send file directly or as a link
-                            if total_size < 8 * 1024 * 1024:  # Less than 8 MB
+                            if total_size < 50 * 1024 * 1024:  # Less than 8 MB
                                 # Send the downloaded file to the user using send_document
                                 with open(final_file_path, 'rb') as f: # Use final_file_path here
                                     try:
