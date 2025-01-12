@@ -9,7 +9,6 @@ import os
 from telegram.error import BadRequest, TimedOut
 import re
 import hashlib
-
 from db import add_file_info
 
 logger = logging.getLogger(__name__)
@@ -112,7 +111,7 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                             add_file_info(file_hash_str, str(final_file_path), file_name)
 
                             # Check file size and decide whether to send file directly or as a link
-                            if total_size < 50 * 1024 * 1024:  # Less than 50 MB 
+                            if total_size < 50 * 1024 * 1024:  # Less than 50 MB
                                 # Send the downloaded file to the user using send_document
                                 with open(final_file_path, 'rb') as f: # use final_file_path (the hashed file)
                                     try:
@@ -151,7 +150,7 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                                 # Get the base URL for file hosting from the environment variable
                                 file_host_base_url = os.getenv("FILE_HOST_BASE_URL")
                                 if file_host_base_url:
-                                    file_url = f"{file_host_base_url}/download/{file_hash_str}"  # Use the file hash in the URL
+                                    file_url = f"{file_host_base_url}/download/{file_hash_str}"
                                     await update.message.reply_text(
                                         f"Your file has been downloaded and is available here: {file_url}"
                                     )

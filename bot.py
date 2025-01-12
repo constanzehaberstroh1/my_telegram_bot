@@ -2,17 +2,19 @@ import logging
 import os
 import re
 from dotenv import load_dotenv
-from telegram import Update, ForceReply, constants, File
+from telegram import Update, ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from pymongo.errors import OperationFailure
 import asyncio
-from db import connect_to_mongodb, get_users_collection, get_log_collection, close_mongodb_connection
+from db import connect_to_mongodb, get_users_collection, get_log_collection, close_mongodb_connection, get_file_info_by_user
 import aiohttp
 import aiofiles
 from aiofiles.threadpool.binary import AsyncFileIO
 from tqdm.asyncio import tqdm
 from pathlib import Path
 from premium import download_file_from_premium_to
+import mimetypes
+import math
 
 # Load environment variables
 load_dotenv()
@@ -22,12 +24,100 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 API_KEY = os.getenv("API_KEY")
 USER_ID = os.getenv("USER_ID")
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR")
+FILE_HOST_BASE_URL = os.getenv("FILE_HOST_BASE_URL")
 
 # Configure logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Lists files downloaded by the user through the Premium.to service."""
+    user_id = update.effective_user.id
+    logger.info(f"Received /premium command from user: {user_id}")
+
+    users_collection = get_users_collection()
+    if users_collection is None:
+        logger.error("MongoDB connection not established. Cannot list files.")
+        await update.message.reply_text("Error: Database connection not available.")
+        return
+
+    try:
+        files_info = get_file_info_by_user(user_id)
+        if not files_info:
+            await update.message.reply_text("No files found.")
+            return
+
+        # Display multiple pages if necessary
+        page_size = 1
+        total_pages = math.ceil(len(files_info) / page_size)
+
+        for page in range(total_pages):
+            start_index = page * page_size
+            end_index = start_index + page_size
+            page_files = files_info[start_index:end_index]
+
+            for file_info in page_files:
+                file_hash = file_info["file_hash"]
+                original_filename = file_info["original_filename"]
+                file_path = file_info["file_path"]  # Full path to the file on disk
+
+                # Construct the download URL (you might need to adjust this based on your file hosting setup)
+                download_url = f"{FILE_HOST_BASE_URL}/download/{file_hash}"
+
+                # Get file size
+                file_size = os.path.getsize(file_path)  # Size in bytes
+
+                # Determine MIME type (used for detecting media files)
+                mime_type, encoding = mimetypes.guess_type(file_path)
+
+                # Create a preview (thumbnail) if it's an image or a video
+                preview = None
+                if mime_type:
+                    if mime_type.startswith("image/"):
+                        preview = open(file_path, "rb")
+                    elif mime_type.startswith("video/"):
+                        preview = open(file_path, "rb")  # You might need a placeholder thumbnail for videos
+
+                # Create the message with file info and download link
+                message_text = (
+                    f"Filename: {original_filename}\n"
+                    f"Size: {file_size} bytes\n"
+                    f"Type: {mime_type or 'Unknown'}\n"
+                    f"URL: {download_url}"  # Display the URL for non-media files
+                )
+
+                # Add an inline keyboard with a "Download" button
+                keyboard = [[InlineKeyboardButton("Download", url=download_url)]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                # Send the message with or without preview
+                if preview:
+                    if mime_type.startswith("image/"):
+                        await update.message.reply_photo(photo=preview, caption=message_text, reply_markup=reply_markup)
+                    elif mime_type.startswith("video/"):
+                        await update.message.reply_video(video=preview, caption=message_text, reply_markup=reply_markup)
+                    preview.close()
+                else:
+                    await update.message.reply_text(message_text, reply_markup=reply_markup)
+
+            # Add pagination buttons if there are multiple pages
+            if total_pages > 1:
+                keyboard = []
+                if page > 0:
+                    keyboard.append(InlineKeyboardButton("Previous", callback_data=f"premium_{page - 1}"))
+                if page < total_pages - 1:
+                    keyboard.append(InlineKeyboardButton("Next", callback_data=f"premium_{page + 1}"))
+                reply_markup = InlineKeyboardMarkup([keyboard])
+                await update.message.reply_text(f"Page {page + 1} of {total_pages}", reply_markup=reply_markup)
+
+    except OperationFailure as e:
+        logger.error(f"MongoDB operation failed: {e}")
+        await update.message.reply_text("Error: Failed to retrieve file list.")
+    except Exception as e:
+        logger.error(f"Error processing /premium command: {e}")
+        await update.message.reply_text("Error: Failed to process your request.")
 
 # /start command handler
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

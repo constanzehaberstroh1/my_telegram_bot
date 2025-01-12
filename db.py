@@ -95,6 +95,28 @@ def get_file_info_by_hash(file_hash):
     except OperationFailure as e:
         logger.error(f"MongoDB operation failed: {e}")
         return None
+        
+def get_file_info_by_user(user_id):
+    """Retrieves file information for a specific user."""
+    users_collection = get_users_collection()
+    if users_collection is None:
+        logger.error("MongoDB connection not established. Cannot retrieve user info.")
+        return None
+
+    try:
+        user_files = []
+        cursor = users_collection.find({"user_id": user_id})
+        for user_data in cursor:
+            # Assuming each user document contains a list of downloaded files
+            if "downloaded_files" in user_data:
+                for file_hash in user_data["downloaded_files"]:
+                    file_info = get_file_info_by_hash(file_hash)
+                    if file_info:
+                        user_files.append(file_info)
+        return user_files
+    except OperationFailure as e:
+        logger.error(f"MongoDB operation failed: {e}")
+        return None
 
 def close_mongodb_connection():
     """Closes the MongoDB connection."""

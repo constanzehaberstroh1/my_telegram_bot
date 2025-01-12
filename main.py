@@ -3,7 +3,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from threading import Thread
 from bot import run_bot, stop_bot
-from db import get_file_info_by_hash, get_log_collection, close_mongodb_connection, connect_to_mongodb
+from db import get_log_collection, close_mongodb_connection, connect_to_mongodb, get_file_info_by_hash
 import logging
 import time
 from typing import List
@@ -185,7 +185,12 @@ async def download_file(file_hash: str):
         logger.error(f"File not found: {file_path}")
         raise HTTPException(status_code=404, detail="File not found")
 
-    return FileResponse(file_path, filename=file_info["original_filename"], content_disposition_type="attachment")
+    # Set the 'Content-Disposition' header to force download
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{file_info['original_filename']}"
+    }
+
+    return FileResponse(file_path, headers=headers, filename=file_info["original_filename"])
 
 if __name__ == "__main__":
     logger.info("Starting FastAPI application...")
