@@ -39,7 +39,6 @@ def guess_mime_type_from_header(file_path):
 def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
     """
     Creates a thumbnail sheet from a video file using ffmpeg.
-    It now extracts frames from across the entire video duration.
     """
     try:
         # Get video duration
@@ -60,14 +59,16 @@ def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
             cols = 4
             rows = math.ceil(num_frames / cols)
 
-        # Generate thumbnail sheet using a filter_complex expression
-        # This approach is more efficient as it directly selects frames at specific timestamps
+        # Generate thumbnail sheet
         select_expr = "+".join([f"eq(t,{i * interval})" for i in range(num_frames)])
+
+        logger.info(f"Creating thumbnail sheet at: {thumbnail_path}")  # Log the path
+
         (
             ffmpeg
             .input(video_path)
             .filter('select', select_expr)
-            .filter('scale', 640, -1)
+            .filter('scale', 320, -1)
             .filter('tile', f'{cols}x{rows}')
             .output(thumbnail_path, vframes=1)
             .overwrite_output()
@@ -87,7 +88,8 @@ def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
         logger.info(f"Thumbnail sheet created for {video_path} at {thumbnail_path}")
 
     except ffmpeg.Error as e:
-        logger.error(f"Error creating thumbnail sheet for {video_path}: {e.stderr.decode()}")
+        logger.error(f"Error creating thumbnail sheet for {video_path}:")
+        logger.error(f"  FFmpeg stderr: {e.stderr.decode()}")  # Log full stderr
 
 async def download_file_from_premium_to(url: str, user_id: int, api_key: str, user_premium_id: str, download_dir: str, update, context):
     """
