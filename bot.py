@@ -403,15 +403,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Download the file and send it to the user
         await update.message.reply_text("Processing your Rapidgator link...")  # Immediate feedback
 
-        file_info = await download_file_from_premium_to(
+        result = await download_file_from_premium_to(
             message_text, user_id, API_KEY, USER_ID, DOWNLOAD_DIR, update, context
         )
 
         # Log the outcome
         log_collection = get_log_collection()
-        if file_info:
+        if result:
+            file_url, file_hash, file_name = result
             log_event = "download_success"
             log_message = f"File downloaded and sent to user {user_id}"
+
+            # Add file info to user's downloaded files
+            users_collection = get_users_collection()
+            if users_collection is not None:
+                try:
+                    users_collection.update_one(
+                        {"user_id": user_id},
+                        {"$addToSet": {"downloaded_files": file_hash}},
+                        upsert=True
+                    )
+                    logger.info(f"File info added to user {user_id}'s downloaded files")
+                except OperationFailure as e:
+                    logger.error(f"MongoDB operation failed: {e}")
+                    await update.message.reply_text("Error: Failed to update user's downloaded files.")
         else:
             log_event = "download_failed"
             log_message = f"Failed to download file for user {user_id}"
@@ -420,7 +435,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "user_id": user_id,
             "event": log_event,
             "url": message_text,
-            "file_info": file_info,
             "timestamp": update.message.date
         }
         try:
