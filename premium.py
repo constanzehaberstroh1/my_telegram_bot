@@ -11,6 +11,7 @@ from telegram import Update, Message
 from telegram.ext import ContextTypes
 import re
 import hashlib
+from bot import FILE_SIZE_LIMIT
 from db import add_file_info, update_file_thumbnail
 import ffmpeg
 import magic
