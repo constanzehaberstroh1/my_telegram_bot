@@ -54,7 +54,7 @@ def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
             ffmpeg
             .input(video_path)
             .filter('select', f'not(mod(n,{num_frames}))')  # Select frames at intervals
-            .filter('scale', 320, -1)  # Adjust scaling if needed
+            .filter('scale', 640, -1)  # Adjust scaling if needed
             .filter('tile', f'{cols}x{rows}')  # More balanced layout
             .output(thumbnail_path, vframes=1)
             .overwrite_output()
