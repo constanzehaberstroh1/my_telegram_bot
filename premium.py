@@ -27,7 +27,7 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
         context: The Telegram ContextTypes object.
 
     Returns:
-        The URL to the downloaded file on Telegram's server, or None if an error occurred.
+        A dictionary containing the file hash and the URL to the downloaded file, or None if an error occurred.
     """
     # Send initial "Processing..." message
     processing_message = await update.message.reply_text("Processing your Rapidgator link...")
@@ -113,16 +113,16 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                             # Check file size and decide whether to send file directly or as a link
                             if total_size < 50 * 1024 * 1024:  # Less than 50 MB
                                 # Send the downloaded file to the user using send_document
-                                with open(final_file_path, 'rb') as f: # use final_file_path (the hashed file)
+                                with open(final_file_path, 'rb') as f:
                                     try:
                                         file_doc = await context.bot.send_document(
                                             chat_id=update.message.chat_id,
                                             document=f,
                                             caption="Here is your file!",
-                                            filename= file_name, # set the filename to original name
-                                            read_timeout=30,  # Increased timeout
-                                            write_timeout=30,  # Increased timeout
-                                            connect_timeout=30   # Increased timeout
+                                            filename= file_name,
+                                            read_timeout=30,
+                                            write_timeout=30,
+                                            connect_timeout=30
                                         )
                                     except TimedOut as e:
                                         logger.error(f"Telegram API timed out while sending document: {e}")
@@ -143,11 +143,13 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                                     f"Your file has been downloaded and is available here: {file_url_on_telegram}"
                                 )
                                 logger.info(f"File sent directly to user {user_id}")
-                                return file_url_on_telegram
+                                return {
+                                    "file_hash": file_hash_str,
+                                    "file_url": file_url_on_telegram
+                                }
 
                             else:  # 50 MB or greater
                                 # Send a link to the user
-                                # Get the base URL for file hosting from the environment variable
                                 file_host_base_url = os.getenv("FILE_HOST_BASE_URL")
                                 if file_host_base_url:
                                     file_url = f"{file_host_base_url}/download/{file_hash_str}"
@@ -155,7 +157,10 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                                         f"Your file has been downloaded and is available here: {file_url}"
                                     )
                                     logger.info(f"File link sent to user {user_id}")
-                                    return file_url
+                                    return {
+                                        "file_hash": file_hash_str,
+                                        "file_url": file_url
+                                    }
                                 else:
                                     error_msg = "Error: FILE_HOST_BASE_URL environment variable not set."
                                     await update.message.reply_text(error_msg)

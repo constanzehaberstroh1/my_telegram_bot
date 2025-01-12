@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 _client = None
 _users_collection = None
 _log_collection = None
-_files_collection = None  # New collection for file information
+_files_collection = None
 
 def connect_to_mongodb():
     """Establishes a connection to MongoDB."""
@@ -19,18 +19,18 @@ def connect_to_mongodb():
     MONGO_DB_NAME = os.getenv("MONGO_DB_NAME")
     MONGO_COLLECTION_NAME = os.getenv("MONGO_COLLECTION_NAME")
     MONGO_LOG_COLLECTION_NAME = os.getenv("MONGO_LOG_COLLECTION_NAME")
-    MONGO_FILES_COLLECTION_NAME = os.getenv("MONGO_FILES_COLLECTION_NAME")  # New
+    MONGO_FILES_COLLECTION_NAME = os.getenv("MONGO_FILES_COLLECTION_NAME")
 
     if _client:
-        return  # Already connected
+        return
 
     try:
         _client = MongoClient(MONGO_URI)
         db = _client[MONGO_DB_NAME]
         _users_collection = db[MONGO_COLLECTION_NAME]
         _log_collection = db[MONGO_LOG_COLLECTION_NAME]
-        _files_collection = db[MONGO_FILES_COLLECTION_NAME]  # New
-        _client.admin.command('ping')  # Test the connection
+        _files_collection = db[MONGO_FILES_COLLECTION_NAME]
+        _client.admin.command('ping')
         logger.info("Successfully connected to MongoDB!")
     except ConnectionFailure as e:
         logger.error(f"Failed to connect to MongoDB: {e}")
@@ -51,7 +51,7 @@ def get_log_collection():
         connect_to_mongodb()
     return _log_collection
 
-def get_files_collection():  # New function
+def get_files_collection():
     """Returns the files collection."""
     global _files_collection
     if _files_collection is None:
@@ -95,6 +95,22 @@ def get_file_info_by_hash(file_hash):
     except OperationFailure as e:
         logger.error(f"MongoDB operation failed: {e}")
         return None
+    
+def add_user_downloaded_file(user_id, file_hash):
+    """Adds a downloaded file to the user's record in the database."""
+    users_collection = get_users_collection()
+    if users_collection is None:
+        logger.error("MongoDB connection not established. Cannot add downloaded file to user.")
+        return
+
+    try:
+        users_collection.update_one(
+            {"user_id": user_id},
+            {"$addToSet": {"downloaded_files": file_hash}}
+        )
+        logger.info(f"Added file {file_hash} to user {user_id}'s downloaded files.")
+    except OperationFailure as e:
+        logger.error(f"MongoDB operation failed: {e}")
 
 def get_file_info_by_user(user_id):
     """Retrieves file information for a specific user."""

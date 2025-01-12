@@ -1,6 +1,7 @@
+# main.py
 import asyncio
 import uvicorn
-from fastapi import FastAPI, HTTPException, Depends, Request, Header
+from fastapi import FastAPI, HTTPException, Depends, Request
 from threading import Thread
 from bot import run_bot, stop_bot
 from db import get_log_collection, close_mongodb_connection, connect_to_mongodb, get_file_info_by_hash
@@ -10,7 +11,7 @@ from typing import List
 from pymongo import DESCENDING
 from pymongo.errors import OperationFailure
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_404_NOT_FOUND
+from starlette.status import HTTP_401_UNAUTHORIZED
 from starlette.responses import JSONResponse, FileResponse
 import secrets
 import os
@@ -163,7 +164,7 @@ async def get_logs(username: str = Depends(authenticate_admin)):
         raise HTTPException(status_code=500, detail="Database connection not available")
 
     try:
-        logs = list(log_collection.find().sort("timestamp", DESCENDING))  # Sort by timestamp in descending order
+        logs = list(log_collection.find().sort("timestamp", DESCENDING))
         # Convert ObjectId to string for JSON serialization
         for log in logs:
             log["_id"] = str(log["_id"])
@@ -194,5 +195,5 @@ async def download_file(file_hash: str):
 
 if __name__ == "__main__":
     logger.info("Starting FastAPI application...")
-    port = int(os.environ.get("PORT", 8000))  # Get port from environment variable or use 8000 as default
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
