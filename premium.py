@@ -39,6 +39,7 @@ def guess_mime_type_from_header(file_path):
 def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
     """
     Creates a thumbnail sheet from a video file using ffmpeg.
+    It now extracts frames from across the entire video duration.
     """
     try:
         # Get video duration
@@ -59,10 +60,13 @@ def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
             cols = 4
             rows = math.ceil(num_frames / cols)
 
-        # Generate thumbnail sheet
+        # Generate thumbnail sheet using a filter_complex expression
+        # This approach is more efficient as it directly selects frames at specific timestamps
         select_expr = "+".join([f"eq(t,{i * interval})" for i in range(num_frames)])
-
-        logger.info(f"Creating thumbnail sheet at: {thumbnail_path}")  # Log the path
+        
+        # Convert thumbnail_path to an absolute path
+        thumbnail_path_absolute = os.path.abspath(thumbnail_path)
+        logger.info(f"Creating thumbnail sheet at: {thumbnail_path_absolute}")  # Log the absolute path
 
         (
             ffmpeg
@@ -70,13 +74,13 @@ def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
             .filter('select', select_expr)
             .filter('scale', 320, -1)
             .filter('tile', f'{cols}x{rows}')
-            .output(thumbnail_path, vframes=1)
+            .output(thumbnail_path_absolute, vframes=1)  # Use absolute path
             .overwrite_output()
             .run(capture_stdout=True, capture_stderr=True)
         )
 
         # Log thumbnail sheet dimensions
-        probe = ffmpeg.probe(thumbnail_path)
+        probe = ffmpeg.probe(thumbnail_path_absolute) # Use absolute path for probe
         video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
         if video_stream:
             width = int(video_stream['width'])
@@ -85,11 +89,11 @@ def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
         else:
             logger.warning("Could not determine thumbnail sheet dimensions.")
 
-        logger.info(f"Thumbnail sheet created for {video_path} at {thumbnail_path}")
+        logger.info(f"Thumbnail sheet created for {video_path} at {thumbnail_path_absolute}")
 
     except ffmpeg.Error as e:
         logger.error(f"Error creating thumbnail sheet for {video_path}:")
-        logger.error(f"  FFmpeg stderr: {e.stderr.decode()}")  # Log full stderr
+        logger.error(f"  FFmpeg stderr: {e.stderr.decode()}")
 
 async def download_file_from_premium_to(url: str, user_id: int, api_key: str, user_premium_id: str, download_dir: str, update, context):
     """
@@ -200,7 +204,7 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                                     thumbnail_path = thumbnail_dir / f"{file_hash_str}.jpg"
 
                                     try:
-                                        create_video_thumbnail_sheet(str(final_file_path), str(thumbnail_path)) # Use new function
+                                        create_video_thumbnail_sheet(str(final_file_path), str(thumbnail_path))
                                         update_file_thumbnail(file_hash_str, str(thumbnail_path))
                                         logger.info(f"Thumbnail sheet created for {file_hash_str} at {thumbnail_path}")
                                     except Exception as e:
