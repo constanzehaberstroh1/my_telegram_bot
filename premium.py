@@ -24,6 +24,40 @@ def guess_mime_type_from_header(file_path):
     except magic.MagicException as e:
         logger.error(f"Error guessing MIME type from header: {e}")
         return None
+    
+def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
+    """
+    Creates a thumbnail sheet from a video file using ffmpeg.
+
+    Args:
+        video_path: Path to the video file.
+        thumbnail_path: Path to save the generated thumbnail sheet.
+        num_frames: The number of frames to extract for the sheet.
+    """
+    try:
+        # Get video duration
+        probe = ffmpeg.probe(video_path)
+        duration = float(probe['format']['duration'])
+
+        # Calculate interval between frames
+        interval = duration / num_frames
+
+        # Generate thumbnail sheet
+        (
+            ffmpeg
+            .input(video_path)
+            .filter('select', f'not(mod(n,{num_frames}))')  # Select frames at intervals
+            .filter('scale', 320, -1)
+            .filter('tile', f'{num_frames}x1')  # Arrange frames in a grid (e.g., 4x3)
+            .output(thumbnail_path, vframes=1)
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+
+        logger.info(f"Thumbnail sheet created for {video_path} at {thumbnail_path}")
+
+    except ffmpeg.Error as e:
+        logger.error(f"Error creating thumbnail sheet for {video_path}: {e.stderr.decode()}")
 
 async def download_file_from_premium_to(url: str, user_id: int, api_key: str, user_premium_id: str, download_dir: str, update, context):
     """
@@ -123,10 +157,11 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                             add_file_info(file_hash_str, str(final_file_path), file_name)
 
                             # Check if the file is a video and create a thumbnail
-                            mime_type = guess_mime_type_from_header(str(final_file_path))  # Use the new function
+                            # Check if the file is a video and create a thumbnail sheet
+                            mime_type = guess_mime_type_from_header(str(final_file_path))
                             logger.info(f"File: {final_file_path}, MIME type (from header): {mime_type}")
 
-                            if (mime_type and mime_type.startswith('video/')) or str(final_file_path).lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):  # Use header-based MIME type
+                            if (mime_type and mime_type.startswith('video/')) or str(final_file_path).lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
                                 images_dir = os.getenv("IMAGES_DIR")
                                 if images_dir:
                                     thumbnail_dir = Path(images_dir) / str(user_id)
@@ -134,18 +169,11 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                                     thumbnail_path = thumbnail_dir / f"{file_hash_str}.jpg"
 
                                     try:
-                                        (
-                                            ffmpeg
-                                            .input(str(final_file_path), ss=10)  # Get a frame at the 10-second mark
-                                            .filter('scale', 320, -1)  # Resize to 320 width, maintaining aspect ratio
-                                            .output(str(thumbnail_path), vframes=1)  # Output a single frame as a JPG
-                                            .overwrite_output()
-                                            .run(capture_stdout=True, capture_stderr=True)
-                                        )
+                                        create_video_thumbnail_sheet(str(final_file_path), str(thumbnail_path)) # Use new function
                                         update_file_thumbnail(file_hash_str, str(thumbnail_path))
-                                        logger.info(f"Thumbnail created for {file_hash_str} at {thumbnail_path}")
-                                    except ffmpeg.Error as e:
-                                        logger.error(f"Error creating thumbnail for {file_hash_str}: {e.stderr.decode()}")
+                                        logger.info(f"Thumbnail sheet created for {file_hash_str} at {thumbnail_path}")
+                                    except Exception as e:
+                                        logger.error(f"Error creating thumbnail sheet for {file_hash_str}: {e}")
                                 else:
                                     logger.error("IMAGES_DIR environment variable not set. Cannot create thumbnails.")
 
