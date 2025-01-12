@@ -1,12 +1,12 @@
 # premium.py
 import aiohttp
 import aiofiles
-from aiofiles.threadpool.binary import AsyncFileIO, TimedOut
+from aiofiles.threadpool.binary import AsyncFileIO
 from tqdm.asyncio import tqdm
 from pathlib import Path
 import logging
 import os
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TimedOut
 import re
 import hashlib
 
