@@ -68,7 +68,7 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                             file_path = user_dir / file_name
 
                             # Check file size and decide whether to send file directly or as a link
-                            if total_size < 50 * 1024 * 1024:  # Less than 8 MB (Reduced from 10 MB)
+                            if total_size < 100 * 1024 * 1024:  # Less than 8 MB (Reduced from 10 MB)
                                 # Download the file
                                 async with aiofiles.open(file_path, 'wb') as f:
                                     chunk_size = 4096
@@ -180,7 +180,7 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                                 # Get the base URL for file hosting from the environment variable
                                 file_host_base_url = os.getenv("FILE_HOST_BASE_URL")
                                 if file_host_base_url:
-                                    file_url = f"{file_host_base_url}/{user_id}/{file_name}"
+                                    file_url = f"{file_host_base_url}/downloads/{user_id}/{file_name}"
                                     await update.message.reply_text(
                                         f"Your file has been downloaded and is available here: {file_url}"
                                     )

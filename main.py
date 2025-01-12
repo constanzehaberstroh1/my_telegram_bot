@@ -11,7 +11,7 @@ from pymongo import DESCENDING
 from pymongo.errors import OperationFailure
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from starlette.status import HTTP_401_UNAUTHORIZED
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, FileResponse
 import secrets
 import os
 
@@ -69,8 +69,8 @@ async def authenticate_admin(credentials: HTTPBasicCredentials = Depends(securit
 # Apply authentication to all routes
 @app.middleware("http")
 async def apply_authentication(request: Request, call_next):
-    # Exclude authentication for the root path ("/")
-    if request.url.path == "/":
+    # Exclude authentication for the root path ("/") and the /download path
+    if request.url.path == "/" or request.url.path.startswith("/download"):
         return await call_next(request)
 
     # Check for authentication for all other paths
@@ -171,6 +171,16 @@ async def get_logs(username: str = Depends(authenticate_admin)):
     except OperationFailure as e:
         logger.error(f"MongoDB operation failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve logs")
+
+@app.get("/download/{user_id}/{file_name}")
+async def download_file(user_id: str, file_name: str):
+    """Serve files from the user's download directory."""
+    file_path = os.path.join(os.getenv("DOWNLOAD_DIR"), user_id, file_name)
+    if not os.path.isfile(file_path):
+        logger.error(f"File not found: {file_path}")
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(file_path)
 
 if __name__ == "__main__":
     logger.info("Starting FastAPI application...")

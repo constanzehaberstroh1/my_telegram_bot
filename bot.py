@@ -376,7 +376,7 @@ async def run_bot():
     logger.info("Starting the bot...")
     await bot_app.start()
     logger.info("Starting polling...")
-    await bot_app.updater.start_polling()
+    await bot_app.updater.start_polling()  # Use start_polling instead of get_updates
     logger.info("Bot started successfully.")
     return bot_app
 
