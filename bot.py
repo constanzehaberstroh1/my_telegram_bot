@@ -449,6 +449,7 @@ async def run_bot():
     bot_app.add_handler(CommandHandler("me", me_command))
     bot_app.add_handler(CommandHandler("unregister", unregister_command))
     bot_app.add_handler(CommandHandler("stop", stop_command))
+    bot_app.add_handler(CommandHandler("premium", premium_command))
 
     # Add middleware handlers
     bot_app.add_handler(MessageHandler(filters.ALL & (~filters.COMMAND), check_user_started), group=-2)
