@@ -1,4 +1,5 @@
 # premium.py
+import math
 import aiohttp
 import aiofiles
 from aiofiles.threadpool.binary import AsyncFileIO
@@ -28,11 +29,6 @@ def guess_mime_type_from_header(file_path):
 def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
     """
     Creates a thumbnail sheet from a video file using ffmpeg.
-
-    Args:
-        video_path: Path to the video file.
-        thumbnail_path: Path to save the generated thumbnail sheet.
-        num_frames: The number of frames to extract for the sheet.
     """
     try:
         # Get video duration
@@ -42,17 +38,38 @@ def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
         # Calculate interval between frames
         interval = duration / num_frames
 
+        # Determine tile layout based on num_frames (adjust logic as needed)
+        if num_frames <= 4:
+            cols = num_frames
+            rows = 1
+        elif num_frames <= 9:
+            cols = 3
+            rows = math.ceil(num_frames / cols)
+        else:
+            cols = 4
+            rows = math.ceil(num_frames / cols)
+
         # Generate thumbnail sheet
         (
             ffmpeg
             .input(video_path)
             .filter('select', f'not(mod(n,{num_frames}))')  # Select frames at intervals
-            .filter('scale', 320, -1)
-            .filter('tile', f'{num_frames}x1')  # Arrange frames in a grid (e.g., 4x3)
+            .filter('scale', 320, -1)  # Adjust scaling if needed
+            .filter('tile', f'{cols}x{rows}')  # More balanced layout
             .output(thumbnail_path, vframes=1)
             .overwrite_output()
             .run(capture_stdout=True, capture_stderr=True)
         )
+
+        # Get image dimensions using ffprobe
+        probe = ffmpeg.probe(thumbnail_path)
+        video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
+        if video_stream:
+            width = int(video_stream['width'])
+            height = int(video_stream['height'])
+            logger.info(f"Thumbnail sheet dimensions: {width} x {height}")
+        else:
+            logger.warning("Could not determine thumbnail sheet dimensions.")
 
         logger.info(f"Thumbnail sheet created for {video_path} at {thumbnail_path}")
 
