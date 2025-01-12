@@ -26,9 +26,20 @@ def guess_mime_type_from_header(file_path):
         logger.error(f"Error guessing MIME type from header: {e}")
         return None
     
+def guess_mime_type_from_header(file_path):
+    """Guesses the MIME type of a file based on its header (magic number)."""
+    try:
+        mime = magic.Magic(mime=True)
+        mime_type = mime.from_file(file_path)
+        return mime_type
+    except magic.MagicException as e:
+        logger.error(f"Error guessing MIME type from header: {e}")
+        return None
+
 def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
     """
     Creates a thumbnail sheet from a video file using ffmpeg.
+    It now extracts frames from across the entire video duration.
     """
     try:
         # Get video duration
@@ -38,7 +49,7 @@ def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
         # Calculate interval between frames
         interval = duration / num_frames
 
-        # Determine tile layout based on num_frames (adjust logic as needed)
+        # Determine tile layout
         if num_frames <= 4:
             cols = num_frames
             rows = 1
@@ -49,19 +60,21 @@ def create_video_thumbnail_sheet(video_path, thumbnail_path, num_frames=12):
             cols = 4
             rows = math.ceil(num_frames / cols)
 
-        # Generate thumbnail sheet
+        # Generate thumbnail sheet using a filter_complex expression
+        # This approach is more efficient as it directly selects frames at specific timestamps
+        select_expr = "+".join([f"eq(t,{i * interval})" for i in range(num_frames)])
         (
             ffmpeg
             .input(video_path)
-            .filter('select', f'not(mod(n,{num_frames}))')  # Select frames at intervals
-            .filter('scale', 640, -1)  # Adjust scaling if needed
-            .filter('tile', f'{cols}x{rows}')  # More balanced layout
+            .filter('select', select_expr)
+            .filter('scale', 640, -1)
+            .filter('tile', f'{cols}x{rows}')
             .output(thumbnail_path, vframes=1)
             .overwrite_output()
             .run(capture_stdout=True, capture_stderr=True)
         )
 
-        # Get image dimensions using ffprobe
+        # Log thumbnail sheet dimensions
         probe = ffmpeg.probe(thumbnail_path)
         video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
         if video_stream:
@@ -173,7 +186,6 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                             # Add file info to the database
                             add_file_info(file_hash_str, str(final_file_path), file_name)
 
-                            # Check if the file is a video and create a thumbnail
                             # Check if the file is a video and create a thumbnail sheet
                             mime_type = guess_mime_type_from_header(str(final_file_path))
                             logger.info(f"File: {final_file_path}, MIME type (from header): {mime_type}")
