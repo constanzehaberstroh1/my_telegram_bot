@@ -133,7 +133,7 @@ async def stop_bot_endpoint(username: str = Depends(authenticate_admin)):
 
     if bot_app and bot_thread and bot_thread.is_alive():
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.new_event_loop()
             loop.run_until_complete(stop_bot(bot_app))
 
             # Close MongoDB connection
