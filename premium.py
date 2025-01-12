@@ -11,7 +11,6 @@ from telegram import Update, Message
 from telegram.ext import ContextTypes
 import re
 import hashlib
-from bot import FILE_SIZE_LIMIT
 from db import add_file_info, update_file_thumbnail
 import ffmpeg
 import magic
@@ -19,6 +18,8 @@ import math
 import asyncio
 
 logger = logging.getLogger(__name__)
+
+FILE_SIZE_LIMIT = 50 * 1024 * 1024  # 50 MB
 
 def guess_mime_type_from_header(file_path):
     """Guesses the MIME type of a file based on its header (magic number)."""
