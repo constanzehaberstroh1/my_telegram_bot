@@ -6,7 +6,7 @@ from tqdm.asyncio import tqdm
 from pathlib import Path
 import logging
 import os
-from telegram.error import BadRequest, TimedOut
+from telegram.error import BadRequest
 import re
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                             file_path = user_dir / file_name
 
                             # Check file size and decide whether to send file directly or as a link
-                            if total_size < 8 * 1024 * 1024:  # Less than 8 MB (Reduced from 10 MB)
+                            if total_size < 50 * 1024 * 1024:  # Less than 8 MB (Reduced from 10 MB)
                                 # Download the file
                                 async with aiofiles.open(file_path, 'wb') as f:
                                     chunk_size = 4096
@@ -177,12 +177,20 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                                                 )
 
                                 # Send a link to the user
-                                file_url = f"https://your-server.com/downloads/{user_id}/{file_name}"  # Replace with your actual URL
-                                await update.message.reply_text(
-                                    f"Your file has been downloaded and is available here: {file_url}"
-                                )
-                                logger.info(f"File link sent to user {user_id}")
-                                return file_url
+                                # Get the base URL for file hosting from the environment variable
+                                file_host_base_url = os.getenv("FILE_HOST_BASE_URL")
+                                if file_host_base_url:
+                                    file_url = f"{file_host_base_url}/{user_id}/{file_name}"
+                                    await update.message.reply_text(
+                                        f"Your file has been downloaded and is available here: {file_url}"
+                                    )
+                                    logger.info(f"File link sent to user {user_id}")
+                                    return file_url
+                                else:
+                                    error_msg = "Error: FILE_HOST_BASE_URL environment variable not set."
+                                    await update.message.reply_text(error_msg)
+                                    logger.error(error_msg)
+                                    return None
 
                         except Exception as e:
                             error_msg = f"Error during download or sending file: {e}"
