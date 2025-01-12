@@ -1,4 +1,4 @@
-# premium.py
+import mimetypes
 import aiohttp
 import aiofiles
 from aiofiles.threadpool.binary import AsyncFileIO
@@ -10,7 +10,7 @@ from telegram.error import BadRequest, TimedOut
 import re
 import hashlib
 from db import add_file_info, update_file_thumbnail
-from vcsi import create_vcsi
+import ffmpeg  # Import ffmpeg-python
 
 logger = logging.getLogger(__name__)
 
@@ -120,11 +120,18 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                                     thumbnail_path = thumbnail_dir / f"{file_hash_str}.jpg"
 
                                     try:
-                                        create_vcsi(str(final_file_path), output=str(thumbnail_path))
+                                        (
+                                            ffmpeg
+                                            .input(str(final_file_path), ss=10)  # Get a frame at the 10-second mark
+                                            .filter('scale', 320, -1)  # Resize to 320 width, maintaining aspect ratio
+                                            .output(str(thumbnail_path), vframes=1)  # Output a single frame as a JPG
+                                            .overwrite_output()
+                                            .run(capture_stdout=True, capture_stderr=True)
+                                        )
                                         update_file_thumbnail(file_hash_str, str(thumbnail_path))
                                         logger.info(f"Thumbnail created for {file_hash_str} at {thumbnail_path}")
-                                    except Exception as e:
-                                        logger.error(f"Error creating thumbnail for {file_hash_str}: {e}")
+                                    except ffmpeg.Error as e:
+                                        logger.error(f"Error creating thumbnail for {file_hash_str}: {e.stderr.decode()}")
                                 else:
                                     logger.error("IMAGES_DIR environment variable not set. Cannot create thumbnails.")
 
