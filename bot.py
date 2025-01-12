@@ -6,10 +6,12 @@ from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 from pymongo.errors import OperationFailure, DuplicateKeyError
-from db import connect_to_mongodb, get_users_collection, get_log_collection, close_mongodb_connection, get_file_info_by_user, add_user_downloaded_file
-from premium import download_file_from_premium_to
+from db import connect_to_mongodb, get_file_info_by_hash, get_users_collection, get_log_collection, close_mongodb_connection, get_file_info_by_user, add_user_downloaded_file, update_file_thumbnail
+from premium import download_file_from_premium_to, create_video_thumbnail_sheet_async
 import mimetypes
 import math
+from pathlib import Path
+import asyncio
 
 # Constants
 FILE_SIZE_LIMIT = 50 * 1024 * 1024  # 50 MB
@@ -24,6 +26,7 @@ API_KEY = os.getenv("API_KEY")
 USER_ID = os.getenv("USER_ID")
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR")
 FILE_HOST_BASE_URL = os.getenv("FILE_HOST_BASE_URL")
+IMAGES_DIR = os.getenv("IMAGES_DIR")
 
 # Configure logging
 logging.basicConfig(
@@ -142,27 +145,6 @@ async def handle_premium_callback(update: Update, context: ContextTypes.DEFAULT_
             logger.warning(f"Invalid page requested: {page}")
             await query.message.edit_text("Invalid page requested.")
 
-async def handle_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles callbacks for the /premium command pagination."""
-    query = update.callback_query
-    await query.answer()
-
-    callback_data = query.data
-    user_id = update.effective_user.id
-
-    if callback_data.startswith("premium_"):
-        page = int(callback_data.split("_")[1])
-        files_info = get_file_info_by_user(user_id)
-        total_pages = math.ceil(len(files_info) / PAGE_SIZE)
-
-        if 0 <= page < total_pages:
-            await query.message.delete()
-            await send_premium_page(update, context, files_info, page)
-        else:
-            logger.warning(f"Invalid page requested: {page}")
-            await query.message.edit_text("Invalid page requested.")
-
-# /start command handler
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Starts the bot for the user and prompts for registration."""
     user_id = update.effective_user.id
@@ -185,7 +167,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.error(f"MongoDB operation failed: {e}")
         await update.message.reply_text("Error: Failed to start bot for user.")
 
-# /register command handler
 async def register_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Registers the user and saves info to MongoDB."""
     user = update.effective_user
@@ -243,7 +224,6 @@ async def register_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         logger.error(f"MongoDB operation failed: {e}")
         await update.message.reply_text("Error: Failed to register user.")
 
-# /me command handler
 async def me_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Retrieves and sends the user's information."""
     user_id = update.effective_user.id
@@ -277,7 +257,6 @@ async def me_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         logger.error(f"MongoDB operation failed: {e}")
         await update.message.reply_text("Error: Failed to retrieve user information.")
 
-# /unregister command handler
 async def unregister_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Soft-deletes the user from the database."""
     user_id = update.effective_user.id
@@ -301,7 +280,6 @@ async def unregister_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"MongoDB operation failed: {e}")
         await update.message.reply_text("Error: Failed to unregister user.")
 
-# /stop command handler
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Stops the bot for the user."""
     user_id = update.effective_user.id
@@ -321,7 +299,6 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.error(f"MongoDB operation failed: {e}")
         await update.message.reply_text("Error: Failed to stop bot for user.")
 
-# Middleware to check user registration status
 async def check_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Checks if the user is registered and not soft-deleted."""
     user_id = update.effective_user.id
@@ -376,7 +353,6 @@ async def check_user_started(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Error: Failed to check user status.")
         return False
 
-# Log user activity
 async def log_activity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Logs user activity to MongoDB."""
     log_collection = get_log_collection()
@@ -424,14 +400,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.info(f"User {user_id} sent a message: {message_text}")
     except OperationFailure as e:
         logger.error(f"MongoDB operation failed: {e}")
-        
+
     # Check if the message is a Rapidgator URL
     if re.match(r"https?://(www\.)?rapidgator\.net", message_text):
-        # Download the file and send it to the user
-        await update.message.reply_text("Processing your Rapidgator link...")
+        # Send initial processing message
+        processing_message = await update.message.reply_text("Processing your Rapidgator link...")
 
+        # Download the file (without waiting for thumbnail generation)
         result = await download_file_from_premium_to(
-            message_text, user_id, API_KEY, USER_ID, DOWNLOAD_DIR, update, context
+            message_text, user_id, API_KEY, USER_ID, DOWNLOAD_DIR, update, context, processing_message
         )
 
         # Log the outcome
@@ -463,6 +440,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 logger.info(log_message)
             except OperationFailure as e:
                 logger.error(f"MongoDB operation failed: {e}")
+
+            # Edit the processing message to show the download link
+            await processing_message.edit_text(f"Your file has been downloaded: {file_url}")
+
+            # Schedule thumbnail generation as a background task
+            asyncio.create_task(generate_thumbnail_and_notify(file_hash, user_id, update))
+
         else:
             log_event = "download_failed"
             log_message = f"Failed to download file for user {user_id}"
@@ -478,10 +462,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             except OperationFailure as e:
                 logger.error(f"MongoDB operation failed: {e}")
 
+            # Inform the user about the error
+            await processing_message.edit_text("Failed to download the file. Please check the link and try again.")
+
     else:
         await update.message.reply_text("Please send a valid Rapidgator URL.")
 
-# Error handler
+async def generate_thumbnail_and_notify(file_hash, user_id, update: Update):
+    """Generates a thumbnail for the given file and notifies the user."""
+    try:
+        file_info = get_file_info_by_hash(file_hash)
+        if not file_info:
+            logger.error(f"File info not found for hash: {file_hash}")
+            return
+
+        file_path = file_info["file_path"]
+        images_dir = os.getenv("IMAGES_DIR")
+        thumbnail_dir = Path(images_dir) / str(user_id)
+        thumbnail_dir.mkdir(parents=True, exist_ok=True)
+        thumbnail_path = thumbnail_dir / f"{file_hash}.jpg"
+
+        await create_video_thumbnail_sheet_async(str(file_path), str(thumbnail_path))
+        update_file_thumbnail(file_hash, str(thumbnail_path))
+        logger.info(f"Thumbnail sheet created for {file_hash} at {thumbnail_path}")
+
+        # Send thumbnail to user
+        with open(thumbnail_path, "rb") as thumb_file:
+            await update.message.reply_photo(photo=thumb_file, caption=f"Thumbnail for: {file_info['original_filename']}")
+
+    except Exception as e:
+        logger.error(f"Error creating or sending thumbnail for {file_hash}: {e}")
+        await update.message.reply_text(f"Error generating thumbnail for file: {file_info['original_filename']}")
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors caused by updates."""
     logger.error(msg="Exception while handling an update:", exc_info=context.error)
