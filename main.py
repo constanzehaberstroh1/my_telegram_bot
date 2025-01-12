@@ -3,14 +3,14 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from threading import Thread
 from bot import run_bot, stop_bot
-from db import get_log_collection, close_mongodb_connection, connect_to_mongodb
+from db import get_log_collection, close_mongodb_connection, connect_to_mongodb, get_file_info_by_hash
 import logging
 import time
 from typing import List
 from pymongo import DESCENDING
 from pymongo.errors import OperationFailure
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_404_NOT_FOUND
 from starlette.responses import JSONResponse, FileResponse
 import secrets
 import os
@@ -172,15 +172,20 @@ async def get_logs(username: str = Depends(authenticate_admin)):
         logger.error(f"MongoDB operation failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve logs")
 
-@app.get("/download/{user_id}/{file_name}")
-async def download_file(user_id: str, file_name: str):
-    """Serve files from the user's download directory."""
-    file_path = os.path.join(os.getenv("DOWNLOAD_DIR"), user_id, file_name)
+@app.get("/download/{file_hash}")
+async def download_file(file_hash: str):
+    """Serve files from the user's download directory based on file hash."""
+    file_info = get_file_info_by_hash(file_hash)
+    if not file_info:
+        logger.error(f"File not found for hash: {file_hash}")
+        raise HTTPException(status_code=404, detail="File not found")
+
+    file_path = file_info["file_path"]
     if not os.path.isfile(file_path):
         logger.error(f"File not found: {file_path}")
         raise HTTPException(status_code=404, detail="File not found")
 
-    return FileResponse(file_path)
+    return FileResponse(file_path, filename=file_info["original_filename"], content_disposition_type="attachment")
 
 if __name__ == "__main__":
     logger.info("Starting FastAPI application...")

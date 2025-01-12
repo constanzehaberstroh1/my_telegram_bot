@@ -1,3 +1,4 @@
+# premium.py
 import aiohttp
 import aiofiles
 from aiofiles.threadpool.binary import AsyncFileIO
@@ -7,6 +8,8 @@ import logging
 import os
 from telegram.error import BadRequest, TimedOut
 import re
+import hashlib
+from db import add_file_info
 
 logger = logging.getLogger(__name__)
 
@@ -64,49 +67,53 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                             except UnicodeEncodeError:
                                 pass  # If encoding fails, keep the original filename
 
-                            file_path = user_dir / file_name
-                            logger.info(f"file name is : {file_name}")
-                            # Check file size and decide whether to send file directly or as a link
-                            if total_size < 50 * 1024 * 1024:  # Less than 8 MB 
-                                # Download the file
-                                async with aiofiles.open(file_path, 'wb') as f:
-                                    chunk_size = 4096
-                                    downloaded_size = 0
-
-                                    async for chunk in response.content.iter_chunked(chunk_size):
-                                        if chunk:
-                                            await f.write(chunk)
-                                            downloaded_size += len(chunk)
-                                            # Calculate progress percentage
-                                            progress = int((downloaded_size / total_size) * 100) if total_size > 0 else 0
-                                            # Send progress update to user (only if progress has changed by at least 5% and is not 100%)
-                                            if progress >= last_progress_update + 5 and progress < 100:
-                                                try:
-                                                    await context.bot.edit_message_text(
-                                                        chat_id=update.message.chat_id,
-                                                        message_id=processing_message.message_id,
-                                                        text=f"Downloading: {progress}%"
-                                                    )
-                                                    last_progress_update = progress  # Update the last progress update percentage
-                                                except BadRequest as e:
-                                                    if "Message is not modified" in str(e):
-                                                        logger.info(f"Message {processing_message.message_id} not modified - progress likely the same.")
-                                                    elif "Message can't be edited" in str(e):
-                                                        logger.warning(f"Could not edit message {processing_message.message_id} - likely too old or deleted.")
-                                                    else:
-                                                        logger.error(f"Error editing message: {e}")
-                                                except Exception as e:
-                                                    logger.error(f"An unexpected error occurred while editing message: {e}")
-                                            elif progress == 100:
-                                                # Send a final update message to indicate completion
+                            # Generate file hash
+                            file_hash = hashlib.sha256()
+                            async with aiofiles.open(user_dir / "tempfile", 'wb') as temp_file:
+                                chunk_size = 4096
+                                downloaded_size = 0
+                                async for chunk in response.content.iter_chunked(chunk_size):
+                                    if chunk:
+                                        await temp_file.write(chunk)
+                                        file_hash.update(chunk)
+                                        downloaded_size += len(chunk)
+                                        progress = int((downloaded_size / total_size) * 100) if total_size > 0 else 0
+                                        if progress >= last_progress_update + 5 and progress < 100:
+                                            try:
                                                 await context.bot.edit_message_text(
                                                     chat_id=update.message.chat_id,
                                                     message_id=processing_message.message_id,
-                                                    text=f"Download complete!"
+                                                    text=f"Downloading: {progress}%"
                                                 )
+                                                last_progress_update = progress
+                                            except BadRequest as e:
+                                                if "Message is not modified" in str(e):
+                                                    logger.info(f"Message {processing_message.message_id} not modified - progress likely the same.")
+                                                elif "Message can't be edited" in str(e):
+                                                    logger.warning(f"Could not edit message {processing_message.message_id} - likely too old or deleted.")
+                                                else:
+                                                    logger.error(f"Error editing message: {e}")
+                                            except Exception as e:
+                                                logger.error(f"An unexpected error occurred while editing message: {e}")
+                                        elif progress == 100:
+                                            await context.bot.edit_message_text(
+                                                chat_id=update.message.chat_id,
+                                                message_id=processing_message.message_id,
+                                                text=f"Download complete!"
+                                            )
 
+                            # Finalize hash and rename file
+                            file_hash_str = file_hash.hexdigest()
+                            final_file_path = user_dir / file_hash_str
+                            os.rename(user_dir / "tempfile", final_file_path)
+
+                            # Add file info to the database
+                            add_file_info(file_hash_str, str(final_file_path), file_name)
+
+                            # Check file size and decide whether to send file directly or as a link
+                            if total_size < 8 * 1024 * 1024:  # Less than 8 MB
                                 # Send the downloaded file to the user using send_document
-                                with open(file_path, 'rb') as f:
+                                with open(final_file_path, 'rb') as f: # Use final_file_path here
                                     try:
                                         file_doc = await context.bot.send_document(
                                             chat_id=update.message.chat_id,
@@ -137,49 +144,12 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                                 logger.info(f"File sent directly to user {user_id}")
                                 return file_url_on_telegram
 
-                            else:  # 10 MB or greater (Reduced to 8 MB)
-                                # Download the file
-                                async with aiofiles.open(file_path, 'wb') as f:
-                                    chunk_size = 4096
-                                    downloaded_size = 0
-
-                                    async for chunk in response.content.iter_chunked(chunk_size):
-                                        if chunk:
-                                            await f.write(chunk)
-                                            downloaded_size += len(chunk)
-                                            # Calculate progress percentage
-                                            progress = int((downloaded_size / total_size) * 100) if total_size > 0 else 0
-                                            # Send progress update to user (only if progress has changed by at least 5% and is not 100%)
-                                            if progress >= last_progress_update + 5 and progress < 100:
-                                                try:
-                                                    await context.bot.edit_message_text(
-                                                        chat_id=update.message.chat_id,
-                                                        message_id=processing_message.message_id,
-                                                        text=f"Downloading: {progress}%"
-                                                    )
-                                                    last_progress_update = progress
-                                                except BadRequest as e:
-                                                    if "Message is not modified" in str(e):
-                                                        logger.info(f"Message {processing_message.message_id} not modified - progress likely the same.")
-                                                    elif "Message can't be edited" in str(e):
-                                                        logger.warning(f"Could not edit message {processing_message.message_id} - likely too old or deleted.")
-                                                    else:
-                                                        logger.error(f"Error editing message: {e}")
-                                                except Exception as e:
-                                                    logger.error(f"An unexpected error occurred while editing message: {e}")
-                                            elif progress == 100:
-                                                # Send a final update message to indicate completion
-                                                await context.bot.edit_message_text(
-                                                    chat_id=update.message.chat_id,
-                                                    message_id=processing_message.message_id,
-                                                    text=f"Download complete!"
-                                                )
-
+                            else:  # 8 MB or greater
                                 # Send a link to the user
                                 # Get the base URL for file hosting from the environment variable
                                 file_host_base_url = os.getenv("FILE_HOST_BASE_URL")
                                 if file_host_base_url:
-                                    file_url = f"{file_host_base_url}/downloads/{user_id}/{file_name}"
+                                    file_url = f"{file_host_base_url}/download/{file_hash_str}"
                                     await update.message.reply_text(
                                         f"Your file has been downloaded and is available here: {file_url}"
                                     )

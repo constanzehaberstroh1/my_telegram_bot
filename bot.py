@@ -75,7 +75,7 @@ async def register_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             users_collection.update_one({"user_id": user.id}, {"$set": {"deleted": False}})
             logger.info(f"User {update.effective_user.id} re-registered (previously soft-deleted).")
             await update.message.reply_text(
-                f"Welcome back, {existing_user['first_name']}! You have been re-registered."
+                                f"Welcome back, {existing_user['first_name']}! You have been re-registered."
             )
             return
         elif existing_user:
@@ -313,13 +313,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Download the file and send it to the user
         await update.message.reply_text("Processing your Rapidgator link...")  # Immediate feedback
 
-        file_url = await download_file_from_premium_to(
+        file_info = await download_file_from_premium_to(
             message_text, user_id, API_KEY, USER_ID, DOWNLOAD_DIR, update, context
         )
 
         # Log the outcome
         log_collection = get_log_collection()
-        if file_url:
+        if file_info:
             log_event = "download_success"
             log_message = f"File downloaded and sent to user {user_id}"
         else:
@@ -330,7 +330,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "user_id": user_id,
             "event": log_event,
             "url": message_text,
-            "file_url": file_url,
+            "file_info": file_info,
             "timestamp": update.message.date
         }
         try:
@@ -376,7 +376,7 @@ async def run_bot():
     logger.info("Starting the bot...")
     await bot_app.start()
     logger.info("Starting polling...")
-    await bot_app.updater.start_polling()  # Use start_polling instead of get_updates
+    await bot_app.updater.start_polling(drop_pending_updates=True)
     logger.info("Bot started successfully.")
     return bot_app
 
