@@ -11,7 +11,7 @@ from pymongo import DESCENDING
 from pymongo.errors import OperationFailure
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from starlette.status import HTTP_401_UNAUTHORIZED
-from starlette.responses import JSONResponse  # Import JSONResponse
+from starlette.responses import JSONResponse
 import secrets
 import os
 
@@ -89,7 +89,7 @@ async def apply_authentication(request: Request, call_next):
         username = await authenticate_admin(credentials)
         request.state.username = username
     except HTTPException as e:
-        # Return a JSONResponse with the error detail
+        # If authentication fails, return the error response
         return JSONResponse(
             status_code=e.status_code,
             content={"detail": e.detail},
