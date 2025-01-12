@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Install ffmpeg and other dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg libgl1-mesa-glx libglib2.0-0
+    apt-get install -y --no-install-recommends ffmpeg libgl1-mesa-glx libglib2.0-0 libmagic1
 
 # Copy the requirements file into the container
 COPY requirements.txt .
