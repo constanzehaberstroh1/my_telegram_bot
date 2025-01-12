@@ -4,6 +4,10 @@ FROM python:3.10-slim
 # Set the working directory inside the container
 WORKDIR /app
 
+# Install ffmpeg and other dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg libgl1-mesa-glx libglib2.0-0
+
 # Copy the requirements file into the container
 COPY requirements.txt .
 
@@ -26,9 +30,11 @@ COPY . .
 # ENV ADMIN_USERNAME=your_admin_username
 # ENV ADMIN_PASSWORD=your_admin_password
 # ENV FILE_HOST_BASE_URL=https://your-server.com
+# ENV IMAGES_DIR=/app/images
 
-# Create the download directory with appropriate permissions
+# Create the download and images directories with appropriate permissions
 RUN mkdir -p /app/downloads && chmod -R 777 /app/downloads
+RUN mkdir -p /app/images && chmod -R 777 /app/images
 
 # Expose the port that FastAPI runs on (default is 8000)
 EXPOSE 8080

@@ -68,7 +68,8 @@ def add_file_info(file_hash, file_path, original_filename):
     file_data = {
         "file_hash": file_hash,
         "file_path": file_path,
-        "original_filename": original_filename
+        "original_filename": original_filename,
+        "thumbnail_path": None
     }
 
     try:
@@ -132,6 +133,25 @@ def get_file_info_by_user(user_id):
     except OperationFailure as e:
         logger.error(f"MongoDB operation failed: {e}")
         return None
+        
+def update_file_thumbnail(file_hash, thumbnail_path):
+    """Updates the thumbnail path for a specific file."""
+    files_collection = get_files_collection()
+    if files_collection is None:
+        logger.error("MongoDB connection not established. Cannot update file thumbnail.")
+        return
+
+    try:
+        result = files_collection.update_one(
+            {"file_hash": file_hash},
+            {"$set": {"thumbnail_path": thumbnail_path}}
+        )
+        if result.modified_count > 0:
+            logger.info(f"Updated thumbnail path for file {file_hash}")
+        else:
+            logger.warning(f"Failed to update thumbnail path for file {file_hash}")
+    except OperationFailure as e:
+        logger.error(f"MongoDB operation failed: {e}")
 
 def close_mongodb_connection():
     """Closes the MongoDB connection."""

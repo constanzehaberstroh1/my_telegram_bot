@@ -9,7 +9,8 @@ import os
 from telegram.error import BadRequest, TimedOut
 import re
 import hashlib
-from db import add_file_info
+from db import add_file_info, update_file_thumbnail
+from vcsi import create_vcsi
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,23 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
 
                             # Add file info to the database
                             add_file_info(file_hash_str, str(final_file_path), file_name)
+
+                            # Check if the file is a video and create a thumbnail
+                            if mimetypes.guess_type(str(final_file_path))[0].startswith('video/'):
+                                images_dir = os.getenv("IMAGES_DIR")
+                                if images_dir:
+                                    thumbnail_dir = Path(images_dir) / str(user_id)
+                                    thumbnail_dir.mkdir(parents=True, exist_ok=True)
+                                    thumbnail_path = thumbnail_dir / f"{file_hash_str}.jpg"
+
+                                    try:
+                                        create_vcsi(str(final_file_path), output=str(thumbnail_path))
+                                        update_file_thumbnail(file_hash_str, str(thumbnail_path))
+                                        logger.info(f"Thumbnail created for {file_hash_str} at {thumbnail_path}")
+                                    except Exception as e:
+                                        logger.error(f"Error creating thumbnail for {file_hash_str}: {e}")
+                                else:
+                                    logger.error("IMAGES_DIR environment variable not set. Cannot create thumbnails.")
 
                             # Check file size and decide whether to send file directly or as a link
                             if total_size < 50 * 1024 * 1024:  # Less than 50 MB

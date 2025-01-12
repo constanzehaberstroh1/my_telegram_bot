@@ -70,6 +70,7 @@ async def send_premium_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         file_hash = file_info["file_hash"]
         original_filename = file_info["original_filename"]
         file_path = file_info["file_path"]
+        thumbnail_path = file_info.get("thumbnail_path")
 
         download_url = f"{FILE_HOST_BASE_URL}/download/{file_hash}"
 
@@ -106,7 +107,40 @@ async def send_premium_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await update.message.reply_text(message_text, reply_markup=reply_markup)
+        # Send message with thumbnail if available
+        if thumbnail_path:
+            try:
+                with open(thumbnail_path, "rb") as thumb_file:
+                    await update.message.reply_photo(photo=thumb_file, caption=message_text, reply_markup=reply_markup)
+            except FileNotFoundError:
+                logger.error(f"Thumbnail not found: {thumbnail_path}")
+                await update.message.reply_text(message_text, reply_markup=reply_markup)
+            except Exception as e:
+                logger.error(f"Error sending thumbnail: {e}")
+                await update.message.reply_text(message_text, reply_markup=reply_markup)
+
+        else:
+            await update.message.reply_text(message_text, reply_markup=reply_markup)
+
+async def handle_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles callbacks for the /premium command pagination."""
+    query = update.callback_query
+    await query.answer()
+
+    callback_data = query.data
+    user_id = update.effective_user.id
+
+    if callback_data.startswith("premium_"):
+        page = int(callback_data.split("_")[1])
+        files_info = get_file_info_by_user(user_id)
+        total_pages = math.ceil(len(files_info) / PAGE_SIZE)
+
+        if 0 <= page < total_pages:
+            await query.message.delete()
+            await send_premium_page(update, context, files_info, page)
+        else:
+            logger.warning(f"Invalid page requested: {page}")
+            await query.message.edit_text("Invalid page requested.")
 
 async def handle_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles callbacks for the /premium command pagination."""
