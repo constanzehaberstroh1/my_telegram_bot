@@ -1,4 +1,3 @@
-# premium.py
 import aiohttp
 import aiofiles
 from aiofiles.threadpool.binary import AsyncFileIO
@@ -6,7 +5,7 @@ from tqdm.asyncio import tqdm
 from pathlib import Path
 import logging
 import os
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TimedOut
 import re
 
 logger = logging.getLogger(__name__)
@@ -66,9 +65,9 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                                 pass  # If encoding fails, keep the original filename
 
                             file_path = user_dir / file_name
-
+                            logger.info(f"file name is : {file_name}")
                             # Check file size and decide whether to send file directly or as a link
-                            if total_size < 100 * 1024 * 1024:  # Less than 8 MB (Reduced from 10 MB)
+                            if total_size < 50 * 1024 * 1024:  # Less than 8 MB 
                                 # Download the file
                                 async with aiofiles.open(file_path, 'wb') as f:
                                     chunk_size = 4096

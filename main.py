@@ -70,7 +70,7 @@ async def authenticate_admin(credentials: HTTPBasicCredentials = Depends(securit
 @app.middleware("http")
 async def apply_authentication(request: Request, call_next):
     # Exclude authentication for the root path ("/") and the /download path
-    if request.url.path == "/" or request.url.path.startswith("/download"):
+    if request.url.path == "/" or request.url.path.startswith("/download/"):
         return await call_next(request)
 
     # Check for authentication for all other paths
