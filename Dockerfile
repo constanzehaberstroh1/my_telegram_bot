@@ -34,4 +34,4 @@ RUN mkdir -p /app/downloads && chmod -R 777 /app/downloads
 EXPOSE 8080
 
 # Command to run the application using Uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "main.py"]
