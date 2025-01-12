@@ -1,14 +1,15 @@
 # premium.py
 import aiohttp
 import aiofiles
-from aiofiles.threadpool.binary import AsyncFileIO
+from aiofiles.threadpool.binary import AsyncFileIO, TimedOut
 from tqdm.asyncio import tqdm
 from pathlib import Path
 import logging
 import os
-from telegram.error import BadRequest, TimedOut
+from telegram.error import BadRequest
 import re
 import hashlib
+
 from db import add_file_info
 
 logger = logging.getLogger(__name__)
@@ -111,14 +112,15 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                             add_file_info(file_hash_str, str(final_file_path), file_name)
 
                             # Check file size and decide whether to send file directly or as a link
-                            if total_size < 50 * 1024 * 1024:  # Less than 8 MB
+                            if total_size < 50 * 1024 * 1024:  # Less than 50 MB 
                                 # Send the downloaded file to the user using send_document
-                                with open(final_file_path, 'rb') as f: # Use final_file_path here
+                                with open(final_file_path, 'rb') as f: # use final_file_path (the hashed file)
                                     try:
                                         file_doc = await context.bot.send_document(
                                             chat_id=update.message.chat_id,
                                             document=f,
                                             caption="Here is your file!",
+                                            filename= file_name, # set the filename to original name
                                             read_timeout=30,  # Increased timeout
                                             write_timeout=30,  # Increased timeout
                                             connect_timeout=30   # Increased timeout
@@ -144,12 +146,12 @@ async def download_file_from_premium_to(url: str, user_id: int, api_key: str, us
                                 logger.info(f"File sent directly to user {user_id}")
                                 return file_url_on_telegram
 
-                            else:  # 8 MB or greater
+                            else:  # 50 MB or greater
                                 # Send a link to the user
                                 # Get the base URL for file hosting from the environment variable
                                 file_host_base_url = os.getenv("FILE_HOST_BASE_URL")
                                 if file_host_base_url:
-                                    file_url = f"{file_host_base_url}/download/{file_hash_str}"
+                                    file_url = f"{file_host_base_url}/download/{file_hash_str}"  # Use the file hash in the URL
                                     await update.message.reply_text(
                                         f"Your file has been downloaded and is available here: {file_url}"
                                     )
