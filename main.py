@@ -3,7 +3,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from threading import Thread
 from bot import run_bot, stop_bot
-from db import get_log_collection, close_mongodb_connection, connect_to_mongodb
+from db import get_file_info_by_hash, get_log_collection, close_mongodb_connection, connect_to_mongodb
 import logging
 import time
 from typing import List
