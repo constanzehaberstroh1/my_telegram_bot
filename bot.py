@@ -12,6 +12,7 @@ import mimetypes
 import math
 from pathlib import Path
 import asyncio
+from audio_processing import process_audio_message, load_words_from_file, gap_fillers, useless_words, conjunctions
 
 # Constants
 FILE_SIZE_LIMIT = 50 * 1024 * 1024  # 50 MB
@@ -523,6 +524,9 @@ async def run_bot():
     # Add message handler to log all user activity and handle Rapidgator URLs
     bot_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message), group=1)
 
+    # Add message handler for audio files
+    bot_app.add_handler(MessageHandler(filters.AUDIO | filters.VOICE | filters.VIDEO | filters.Document.AUDIO | filters.Document.VIDEO | filters.VIDEO_NOTE, process_audio_message))
+    
     # Add error handler
     bot_app.add_error_handler(error_handler)
 
