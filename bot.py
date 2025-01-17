@@ -3,8 +3,8 @@ import logging
 import os
 import re
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
+from telegram import ChatMember, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler, ChatMemberHandler
 from pymongo.errors import OperationFailure, DuplicateKeyError
 from db import connect_to_mongodb, get_file_info_by_hash, get_users_collection, get_log_collection, close_mongodb_connection, get_file_info_by_user, add_user_downloaded_file, update_file_thumbnail
 from premium import download_file_from_premium_to, create_video_thumbnail_sheet_async
@@ -12,7 +12,8 @@ import mimetypes
 import math
 from pathlib import Path
 import asyncio
-from audio_processing import process_audio_message, load_words_from_file, gap_fillers, useless_words, conjunctions
+from audio_processing import process_audio_message, load_words_from_file, gap_fillers, useless_words, conjunctions, generate_hashtags
+from telegram.request import HTTPXRequest
 
 # Constants
 FILE_SIZE_LIMIT = 50 * 1024 * 1024  # 50 MB
@@ -28,6 +29,7 @@ USER_ID = os.getenv("USER_ID")
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR")
 FILE_HOST_BASE_URL = os.getenv("FILE_HOST_BASE_URL")
 IMAGES_DIR = os.getenv("IMAGES_DIR")
+ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")
 
 # Configure logging
 logging.basicConfig(
@@ -499,12 +501,72 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     """Log errors caused by updates."""
     logger.error(msg="Exception while handling an update:", exc_info=context.error)
 
+async def greet_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Greets new chat members and sends a message when the bot is added to a group."""
+    result = update.chat_member.new_chat_member
+    if result.status == ChatMember.MEMBER and result.user.id == context.bot.id:
+        # Bot was added to the group
+        try:
+            await update.message.reply_text(
+                "Hello! I'm your new audio processing bot. Send /help to see available commands."
+            )
+        except:
+            await update.effective_chat.send_message(
+                "Hello! I'm your new audio processing bot. Send /help to see available commands."
+            )
+        logger.info(f"Bot added to group: {update.effective_chat.title} (ID: {update.effective_chat.id})")
+
+async def group_post_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Processes audio files in the group and sends info to the admin."""
+    if not update.effective_chat.type.endswith("group"):
+        await update.message.reply_text("This command is only for groups.")
+        return
+
+    chat_id = update.effective_chat.id
+    admin_user_id = int(ADMIN_USER_ID) # Convert to integer
+
+    try:
+        # Get the last 50 messages (adjust as needed)
+        messages = await context.bot.get_chat_history(chat_id, limit=50)
+
+        for message in messages:
+            if message.audio or message.document:
+                if message.audio:
+                    mime_type = message.audio.mime_type
+                    file_name = message.audio.file_name
+                elif message.document:
+                    mime_type = message.document.mime_type
+                    file_name = message.document.file_name
+
+                # Handle forwarded files without a filename
+                if not file_name:
+                    if message.caption:
+                        caption_parts = message.caption.split()
+                        for part in caption_parts:
+                            if '.' in part:
+                                file_name = part
+                                break
+                        if not file_name:
+                            file_name = caption_parts[0] if caption_parts else "unknown_file"
+                    else:
+                        file_name = "unknown_file"
+
+                # Check if audio file
+                if mime_type and mime_type.startswith('audio/'):
+                    hashtags = generate_hashtags(file_name)
+                    response = f"Filename: {file_name}\nHashtags: {' '.join(hashtags)}"
+                    await context.bot.send_message(chat_id=admin_user_id, text=response)
+
+    except Exception as e:
+        logger.error(f"Error processing /group_post: {e}")
+        await context.bot.send_message(chat_id=admin_user_id, text="Error processing /group_post command.")
+
 async def run_bot():
     """Set up and run the Telegram bot."""
     logger.info("Setting up the bot...")
     connect_to_mongodb()
 
-    bot_app = Application.builder().token(BOT_TOKEN).build()
+    bot_app = Application.builder().token(BOT_TOKEN).connect_timeout(20).read_timeout(20).get_updates_request_timeout(20).pool_timeout(20).build()
 
     # Add command handlers
     bot_app.add_handler(CommandHandler("start", start_command))
@@ -513,6 +575,7 @@ async def run_bot():
     bot_app.add_handler(CommandHandler("unregister", unregister_command))
     bot_app.add_handler(CommandHandler("stop", stop_command))
     bot_app.add_handler(CommandHandler("premium", premium_command))
+    bot_app.add_handler(CommandHandler("group_post", group_post_command))
 
     # Add the callback query handler for /premium pagination
     bot_app.add_handler(CallbackQueryHandler(handle_premium_callback, pattern="^premium_"))
@@ -529,6 +592,9 @@ async def run_bot():
     
     # Add error handler
     bot_app.add_error_handler(error_handler)
+
+    # Add handler for bot being added to a group
+    bot_app.add_handler(ChatMemberHandler(greet_chat_members, ChatMemberHandler.MY_CHAT_MEMBER))
 
     # Start the bot
     logger.info("Initializing the bot...")

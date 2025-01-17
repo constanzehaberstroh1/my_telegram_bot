@@ -3,9 +3,7 @@ import logging
 import re
 from telegram import Update
 from telegram.ext import ContextTypes
-from db import get_file_info_by_hash
 import os
-import tempfile
 
 # Configure logging
 logging.basicConfig(
@@ -34,27 +32,36 @@ conjunctions = set(load_words_from_file('conjunctions.txt'))
 async def process_audio_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles messages determined to be audio files."""
     message = update.message
-    file_name = None  # Initialize file_name to None
+    file_name = None
 
-    # Determine whether the message is a document or an audio
+    # Determine file type and potential filename
     if message.document:
-        file_id = message.document.file_id
         mime_type = message.document.mime_type
-        file_name = message.document.file_name  # Use document's file_name
+        file_name = message.document.file_name  # Try to get from document
     elif message.audio:
-        file_id = message.audio.file_id
         mime_type = message.audio.mime_type
-        file_name = message.audio.file_name  # Use audio's file_name
+        file_name = message.audio.file_name  # Try to get from audio
 
     # Handle forwarded files without a filename
     if not file_name:
-        # Extract a name from the caption, if available
         if message.caption:
-            file_name = message.caption.split()[0] # Take the first word of the caption
-            logger.info(f"Using caption for filename: {file_name}")
+            # Extract potential filename from caption
+            caption_parts = message.caption.split()
+            for part in caption_parts:
+                if '.' in part:  # Simple check for file extension
+                    file_name = part
+                    logger.info(f"Using potential filename from caption: {file_name}")
+                    break
+            if not file_name:
+                file_name = caption_parts[0] if caption_parts else None  # Use first word or None
+                logger.info(f"Using first word of caption as filename: {file_name}")
         else:
-            file_name = f"forwarded_audio_{file_id}"  # Fallback: Use file_id
-            logger.warning(f"No filename found. Using fallback: {file_name}")
+            logger.warning("No filename found in forwarded message.")
+
+    # Skip if no filename could be determined
+    if not file_name:
+        await message.reply_text("Could not determine the filename.", reply_to_message_id=message.message_id)
+        return
 
     # Check if the mime type indicates an audio file
     if not mime_type or not mime_type.startswith('audio/'):
@@ -63,33 +70,14 @@ async def process_audio_message(update: Update, context: ContextTypes.DEFAULT_TY
 
     logger.info(f"Processing audio file: {file_name} (MIME type: {mime_type})")
 
-    try:
-        # Download the file
-        new_file = await context.bot.get_file(file_id)
-        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            await new_file.download_to_drive(temp_file.name)
-            temp_file_path = temp_file.name
+    # Extract hashtags from the filename
+    hashtags = generate_hashtags(file_name)
 
-        # Extract hashtags from the filename
-        hashtags = generate_hashtags(file_name)
-
-        # Reply with hashtags
-        if hashtags:
-            await message.reply_text(f"Hashtags: {' '.join(hashtags)}", reply_to_message_id=message.message_id)
-        else:
-            await message.reply_text("Could not generate hashtags for this file.", reply_to_message_id=message.message_id)
-
-    except Exception as e:
-        logger.error(f"Error processing audio file: {e}")
-        await message.reply_text("An error occurred while processing the audio file.", reply_to_message_id=message.message_id)
-
-    finally:
-        # Clean up: delete the temporary file
-        if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-            try:
-                os.unlink(temp_file_path)
-            except Exception as e:
-                logger.error(f"Error deleting temporary file {temp_file_path}: {e}")
+    # Reply with hashtags
+    if hashtags:
+        await message.reply_text(f"Hashtags: {' '.join(hashtags)}", reply_to_message_id=message.message_id)
+    else:
+        await message.reply_text("Could not generate hashtags for this file.", reply_to_message_id=message.message_id)
 
 
 def clean_filename(filename: str) -> str:
@@ -97,10 +85,16 @@ def clean_filename(filename: str) -> str:
     try:
         # Remove file extension
         filename = os.path.splitext(filename)[0]
-        # Remove special characters except hyphens and underscores
+
+        # Replace underscores with spaces
+        filename = filename.replace("_", " ")
+
+        # Remove special characters except hyphens
         filename = re.sub(r"[^\w\s-]", " ", filename)
+
         # Replace multiple spaces with a single space
         filename = re.sub(r"\s+", " ", filename).strip()
+
         return filename
     except Exception as e:
         logger.error(f"Error cleaning filename '{filename}': {e}")
